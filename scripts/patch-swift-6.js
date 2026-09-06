@@ -70,7 +70,31 @@ console.log('Searching for Swift weak let / modifier order in node_modules...');
 patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-jsi'));
 patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-core'));
 
-// 2. Patch Package.swift tools version (6.2 -> 6.0 for broad Swift compiler compatibility)
+// 2. Patch trailing comma in JavaScriptRuntime.swift line 402 for Swift 6.0 compatibility
+const jsRuntimeSwiftPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI', 'Runtime', 'JavaScriptRuntime.swift');
+if (fs.existsSync(jsRuntimeSwiftPath)) {
+  let jsRuntimeContent = fs.readFileSync(jsRuntimeSwiftPath, 'utf8');
+  if (jsRuntimeContent.includes('_ arguments: consuming JavaScriptValuesBuffer,')) {
+    console.log(`Patching trailing comma in: ${jsRuntimeSwiftPath}`);
+    jsRuntimeContent = jsRuntimeContent.replace('_ arguments: consuming JavaScriptValuesBuffer,', '_ arguments: consuming JavaScriptValuesBuffer');
+    fs.writeFileSync(jsRuntimeSwiftPath, jsRuntimeContent, 'utf8');
+    patchedFilesCount++;
+  }
+}
+
+// 3. Patch RuntimeScheduler.h SWIFT_RETURNS_RETAINED on constructors
+const runtimeSchedulerPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI-Cxx', 'include', 'RuntimeScheduler.h');
+if (fs.existsSync(runtimeSchedulerPath)) {
+  let runtimeSchedulerContent = fs.readFileSync(runtimeSchedulerPath, 'utf8');
+  if (runtimeSchedulerContent.includes('SWIFT_RETURNS_RETAINED RuntimeScheduler')) {
+    console.log(`Patching SWIFT_RETURNS_RETAINED constructors in: ${runtimeSchedulerPath}`);
+    runtimeSchedulerContent = runtimeSchedulerContent.replace(/SWIFT_RETURNS_RETAINED\s+RuntimeScheduler\(/g, 'RuntimeScheduler(');
+    fs.writeFileSync(runtimeSchedulerPath, runtimeSchedulerContent, 'utf8');
+    patchedFilesCount++;
+  }
+}
+
+// 4. Patch Package.swift tools version (6.2 -> 6.0 for broad Swift compiler compatibility)
 const packageSwiftPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'Package.swift');
 if (fs.existsSync(packageSwiftPath)) {
   let packageSwift = fs.readFileSync(packageSwiftPath, 'utf8');
@@ -82,7 +106,7 @@ if (fs.existsSync(packageSwiftPath)) {
   }
 }
 
-// 3. Patch build-xcframework.sh in expo-modules-jsi
+// 5. Patch build-xcframework.sh in expo-modules-jsi
 const buildScriptPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'scripts', 'build-xcframework.sh');
 if (fs.existsSync(buildScriptPath)) {
   let scriptContent = fs.readFileSync(buildScriptPath, 'utf8');

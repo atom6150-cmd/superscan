@@ -127,3 +127,13 @@ jobs:
           name: superscan-ios-app
           path: superscan.ipa
           retention-days: 7
+
+      - name: 上傳建置日誌 (隨時可供排查)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            xcodebuild.log
+            node_modules/expo-modules-jsi/apple/xcframework.log
+          retention-days: 3

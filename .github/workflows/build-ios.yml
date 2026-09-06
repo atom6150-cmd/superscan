@@ -27,11 +27,13 @@ jobs:
       - name: 安裝依賴套件
         run: npm ci || npm install
 
-      - name: 修正 Swift Package Tools 版本與語法 (適配 Xcode 16.2 / Swift 6.0，移除末尾逗號)
+      - name: 修正 Swift Package Tools 版本與語法 (適配 Xcode 16.2 / Swift 6.0，移除末尾逗號與向下相容巨集)
         run: |
           node -e "
           const fs = require('fs');
           const path = require('path');
+
+          // 1. 修正 Package.swift 工具版本與末尾逗號
           function walk(d) {
             for (let f of fs.readdirSync(d)) {
               let p = path.join(d, f);
@@ -56,6 +58,17 @@ jobs:
             }
           }
           walk('node_modules');
+
+          // 2. 修正 RuntimeScheduler.h 中 Swift 6.0 尚未定義的 SWIFT_RETURNS_RETAINED 巨集
+          const rsPath = 'node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/RuntimeScheduler.h';
+          if (fs.existsSync(rsPath)) {
+            let rs = fs.readFileSync(rsPath, 'utf8');
+            if (!rs.includes('#ifndef SWIFT_RETURNS_RETAINED')) {
+              rs = rs.replace('#include <swift/bridging>', '#include <swift/bridging>\n\n#ifndef SWIFT_RETURNS_RETAINED\n#define SWIFT_RETURNS_RETAINED\n#endif');
+              fs.writeFileSync(rsPath, rs);
+              console.log('Fixed SWIFT_RETURNS_RETAINED in RuntimeScheduler.h');
+            }
+          }
           "
 
       - name: 產生 iOS 原生專案 (Expo Prebuild)

@@ -337,6 +337,125 @@ function patchPrecompiledModules(dir) {
   });
 }
 
+// 10. Patch ExpoModulesCore Swift files: fix invalid @MainActor protocol inheritance syntax and missing Sendable conformances
+function patchExpoModulesCoreMainActor(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('.swift') || !filePath.includes('expo-modules-core')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    let changed = false;
+
+    // ViewDefinition.swift
+    if (content.includes('extension UIView: @MainActor AnyArgument')) {
+      content = content.replace('extension UIView: @MainActor AnyArgument', '@MainActor extension UIView: AnyArgument');
+      changed = true;
+    }
+
+    // SwiftUIHostingView.swift
+    if (content.includes('public final class HostingView<Props: ViewProps, ContentView: View<Props>>: ExpoView, @MainActor AnyExpoSwiftUIHostingView')) {
+      content = content.replace(
+        'public final class HostingView<Props: ViewProps, ContentView: View<Props>>: ExpoView, @MainActor AnyExpoSwiftUIHostingView',
+        '@MainActor public final class HostingView<Props: ViewProps, ContentView: View<Props>>: ExpoView, AnyExpoSwiftUIHostingView'
+      );
+      changed = true;
+    }
+    if (content.includes('internal protocol AnyExpoSwiftUIHostingView') && !content.includes('@MainActor internal protocol AnyExpoSwiftUIHostingView')) {
+      content = content.replace('internal protocol AnyExpoSwiftUIHostingView', '@MainActor internal protocol AnyExpoSwiftUIHostingView');
+      changed = true;
+    }
+
+    // SwiftUIVirtualView.swift
+    if (content.includes('final class SwiftUIVirtualView<Props: ViewProps, ContentView: View<Props>>: SwiftUIVirtualViewObjC, @MainActor ExpoSwiftUIView')) {
+      content = content.replace(
+        'final class SwiftUIVirtualView<Props: ViewProps, ContentView: View<Props>>: SwiftUIVirtualViewObjC, @MainActor ExpoSwiftUIView',
+        '@MainActor final class SwiftUIVirtualView<Props: ViewProps, ContentView: View<Props>>: SwiftUIVirtualViewObjC, ExpoSwiftUIView'
+      );
+      changed = true;
+    }
+    if (content.includes('final class SwiftUIVirtualViewDev<Props: ViewProps, ContentView: View<Props>>: SwiftUIVirtualViewObjCDev, @MainActor ExpoSwiftUIView')) {
+      content = content.replace(
+        'final class SwiftUIVirtualViewDev<Props: ViewProps, ContentView: View<Props>>: SwiftUIVirtualViewObjCDev, @MainActor ExpoSwiftUIView',
+        '@MainActor final class SwiftUIVirtualViewDev<Props: ViewProps, ContentView: View<Props>>: SwiftUIVirtualViewObjCDev, ExpoSwiftUIView'
+      );
+      changed = true;
+    }
+    if (content.includes('extension ExpoSwiftUI.SwiftUIVirtualView: @MainActor ExpoSwiftUI.ViewWrapper')) {
+      content = content.replace(
+        'extension ExpoSwiftUI.SwiftUIVirtualView: @MainActor ExpoSwiftUI.ViewWrapper',
+        '@MainActor extension ExpoSwiftUI.SwiftUIVirtualView: ExpoSwiftUI.ViewWrapper'
+      );
+      changed = true;
+    }
+    if (content.includes('extension ExpoSwiftUI.SwiftUIVirtualViewDev: @MainActor ExpoSwiftUI.ViewWrapper')) {
+      content = content.replace(
+        'extension ExpoSwiftUI.SwiftUIVirtualViewDev: @MainActor ExpoSwiftUI.ViewWrapper',
+        '@MainActor extension ExpoSwiftUI.SwiftUIVirtualViewDev: ExpoSwiftUI.ViewWrapper'
+      );
+      changed = true;
+    }
+
+    // ExpoSwiftUI.swift
+    if (content.includes('public protocol ViewWrapper {') && !content.includes('@MainActor public protocol ViewWrapper {')) {
+      content = content.replace('public protocol ViewWrapper {', '@MainActor public protocol ViewWrapper {');
+      changed = true;
+    }
+
+    // SceneGeometry.swift
+    if (content.includes('public enum SceneGeometry {') && !content.includes('@MainActor public enum SceneGeometry {')) {
+      content = content.replace('public enum SceneGeometry {', '@MainActor public enum SceneGeometry {');
+      changed = true;
+    }
+
+    // SwiftUIViewFrameObserver.swift: main actor isolation in observer closure
+    if (content.includes('callback(CGRect(origin: view.frame.origin, size: newValue.size))') && !content.includes('MainActor.assumeIsolated')) {
+      content = content.replace(
+        'callback(CGRect(origin: view.frame.origin, size: newValue.size))',
+        'MainActor.assumeIsolated { callback(CGRect(origin: view.frame.origin, size: newValue.size)) }'
+      );
+      changed = true;
+    }
+
+
+    // URLAuthenticationChallengeForwardSender.swift
+    if (content.includes('internal final class URLAuthenticationChallengeForwardSender: NSObject, URLAuthenticationChallengeSender {')) {
+      content = content.replace(
+        'internal final class URLAuthenticationChallengeForwardSender: NSObject, URLAuthenticationChallengeSender {',
+        'internal final class URLAuthenticationChallengeForwardSender: NSObject, URLAuthenticationChallengeSender, @unchecked Sendable {'
+      );
+      changed = true;
+    }
+
+    // URLSessionSessionDelegateProxy.swift
+    if (content.includes('public final class URLSessionSessionDelegateProxy: NSObject, URLSessionDataDelegate {')) {
+      content = content.replace(
+        'public final class URLSessionSessionDelegateProxy: NSObject, URLSessionDataDelegate {',
+        'public final class URLSessionSessionDelegateProxy: NSObject, URLSessionDataDelegate, @unchecked Sendable {'
+      );
+      changed = true;
+    }
+
+    if (changed) {
+      console.log(`[patched] ExpoModulesCore concurrency in: ${filePath}`);
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
+// 11. Patch podspecs: use Swift 5.9 for source-built Expo pods to prevent Swift 6 strict concurrency errors
+function patchPodspecsSwiftVersion(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('.podspec')) return;
+    if (filePath.includes('ExpoModulesJSI')) return; // ExpoModulesJSI stays 6.0 for C++ interop
+    let content = fs.readFileSync(filePath, 'utf8');
+    if (/s\.swift_version\s*=\s*'6\.0'/.test(content)) {
+      console.log(`[patched] podspec swift_version to 5.9 in: ${filePath}`);
+      content = content.replace(/s\.swift_version\s*=\s*'6\.0'/g, "s.swift_version = '5.9'");
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
 const nodeModulesDir = path.resolve(__dirname, '..', 'node_modules');
 
 console.log('--- Applying Swift 6 & Xcode 16.4 compatibility patches ---');
@@ -350,6 +469,9 @@ patchDateCoding(nodeModulesDir);
 patchPackageSwift(nodeModulesDir);
 patchBuildXcframework(nodeModulesDir);
 patchPrecompiledModules(nodeModulesDir);
+patchExpoModulesCoreMainActor(nodeModulesDir);
+patchPodspecsSwiftVersion(nodeModulesDir);
 
 console.log(`Patch completed successfully. Total files touched: ${patchedFilesCount}`);
+
 

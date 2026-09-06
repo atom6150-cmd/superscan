@@ -31,9 +31,11 @@ end
           config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
           config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
           config.build_settings['CODE_SIGN_IDENTITY'] = ''
+          config.build_settings['SWIFT_STRICT_CONCURRENCY'] = 'minimal'
         end
       end
     end
+
 `;
 
   if (!podfile.includes('module PrecompiledModules')) {

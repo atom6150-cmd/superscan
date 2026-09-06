@@ -1,0 +1,38 @@
+{
+  "name": "superscan",
+  "version": "1.0.0",
+  "main": "index.ts",
+  "dependencies": {
+    "@expo/metro-runtime": "~57.0.15",
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~57.0.20",
+    "expo-camera": "~57.0.4",
+    "expo-file-system": "~57.0.6",
+    "expo-font": "~57.0.3",
+    "expo-image-manipulator": "~57.0.16",
+    "expo-image-picker": "~57.0.16",
+    "expo-media-library": "~57.0.4",
+    "expo-print": "~57.0.1",
+    "expo-sharing": "~57.0.18",
+    "expo-status-bar": "~57.0.1",
+    "pdf-lib": "^1.17.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-web": "^0.21.2"
+  },
+  "devDependencies": {
+    "@expo/ngrok": "^4.1.3",
+    "@types/react": "~19.2.2",
+    "eas-cli": "^23.2.0",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "private": true
+}

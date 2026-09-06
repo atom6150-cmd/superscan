@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "superscan",
+    "slug": "superscan",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.midaswang.superscan",
+      "infoPlist": {
+        "NSCameraUsageDescription": "需要相機權限以進行高品質文件與發票掃描",
+        "NSPhotoLibraryUsageDescription": "需要相簿權限以選取要轉換為 PDF 的文件圖片",
+        "NSPhotoLibraryAddUsageDescription": "需要儲存權限以保存導出的文件圖檔",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-sharing",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "需要相機權限以掃描實體紙本文件"
+        }
+      ],
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "ca72613b-e903-4977-a722-6742a7c65ada"
+      }
+    }
+  }
+}

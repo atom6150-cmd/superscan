@@ -1,0 +1,22 @@
+{
+  "cli": {
+    "version": ">= 23.2.0",
+    "requireCommit": false
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      }
+    },
+    "production": {}
+  },
+  "submit": {
+    "production": {}
+  }
+}

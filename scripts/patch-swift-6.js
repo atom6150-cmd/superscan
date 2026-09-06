@@ -86,14 +86,30 @@ function patchHostObjectCallbacks(dir) {
   walkDir(dir, (filePath) => {
     if (!filePath.endsWith('HostObjectCallbacks.h') || !filePath.includes('expo-modules-jsi')) return;
     let content = fs.readFileSync(filePath, 'utf8');
+    let changed = false;
+
+    if (!content.includes('IRuntimeCompat.h')) {
+      content = content.replace('#include <jsi/jsi.h>', '#include <jsi/jsi.h>\n#include "IRuntimeCompat.h"');
+      changed = true;
+    }
+
+    if (content.includes('facebook::jsi::Runtime &runtime')) {
+      content = content.replace('facebook::jsi::Runtime &runtime', 'facebook::jsi::IRuntime &runtime');
+      changed = true;
+    }
+
     if (!content.includes('appendPropNameId')) {
       console.log(`[patched] Adding appendPropNameId helper in: ${filePath}`);
       const helper = `
-inline void appendPropNameId(HostObjectCallbacks::PropNameIds &vector, facebook::jsi::Runtime &runtime, const std::string &name) {
+inline void appendPropNameId(HostObjectCallbacks::PropNameIds &vector, facebook::jsi::IRuntime &runtime, const std::string &name) {
   vector.push_back(facebook::jsi::PropNameID::forUtf8(runtime, name));
 }
 `;
       content = content.replace('} SWIFT_NONCOPYABLE; // class HostObjectCallbacks', '} SWIFT_NONCOPYABLE; // class HostObjectCallbacks\n' + helper);
+      changed = true;
+    }
+
+    if (changed) {
       fs.writeFileSync(filePath, content, 'utf8');
       patchedFilesCount++;
     }

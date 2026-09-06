@@ -27,7 +27,7 @@ jobs:
       - name: 安裝依賴套件
         run: npm ci || npm install
 
-      - name: 修正 Swift Package Tools 版本 (適配 Xcode 16.2 / Swift 6.0)
+      - name: 修正 Swift Package Tools 版本與語法 (適配 Xcode 16.2 / Swift 6.0，移除末尾逗號)
         run: |
           node -e "
           const fs = require('fs');
@@ -37,10 +37,18 @@ jobs:
               let p = path.join(d, f);
               if (f === 'Package.swift') {
                 let content = fs.readFileSync(p, 'utf8');
+                let changed = false;
                 if (content.includes('swift-tools-version: 6.2')) {
                   content = content.replace(/swift-tools-version: 6\.2/g, 'swift-tools-version: 6.0');
+                  changed = true;
+                }
+                if (/,(\s*\))/.test(content)) {
+                  content = content.replace(/,(\s*\))/g, (m, p1) => p1);
+                  changed = true;
+                }
+                if (changed) {
                   fs.writeFileSync(p, content);
-                  console.log('Fixed swift-tools-version in:', p);
+                  console.log('Fixed Package.swift:', p);
                 }
               } else if (fs.statSync(p).isDirectory() && f !== '.git') {
                 walk(p);

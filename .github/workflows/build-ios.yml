@@ -30,27 +30,51 @@ jobs:
       - name: 產生 iOS 原生專案 (Expo Prebuild)
         run: npx expo prebuild --platform ios --clean --no-install
 
+      - name: 配置 Podfile 停用原生庫簽名 (防止 Xcode 16 Privacy Bundle 報錯)
+        run: |
+          node -e "
+          const fs = require('fs');
+          let content = fs.readFileSync('ios/Podfile', 'utf8');
+          const bypassCode = \`
+              installer.generated_projects.each do |project|
+                project.targets.each do |target|
+                  target.build_configurations.each do |config|
+                    config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
+                    config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
+                    config.build_settings['CODE_SIGN_IDENTITY'] = ''
+                  end
+                end
+              end
+          \`;
+          content = content.replace(/post_install do \|installer\|/, 'post_install do |installer|' + bypassCode);
+          fs.writeFileSync('ios/Podfile', content);
+          console.log('Podfile signing bypass configured.');
+          "
+
       - name: 安裝 CocoaPods
         run: |
           cd ios
           pod install --repo-update
           cd ..
 
-      - name: 使用 Xcode 編譯未簽名 iOS 原生應用程式
+      - name: 使用 Xcode 編譯並歸檔 (Archive) 未簽名 iOS 原生應用程式
         run: |
-          xcodebuild -workspace ios/superscan.xcworkspace \
+          xcodebuild archive \
+            -workspace ios/superscan.xcworkspace \
             -scheme superscan \
             -configuration Release \
             -destination 'generic/platform=iOS' \
-            -derivedDataPath build \
+            -archivePath build/superscan.xcarchive \
+            CODE_SIGN_STYLE=Manual \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE_SPECIFIER=""
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            COMPILER_INDEX_STORE_ENABLE=NO
 
       - name: 打包成標準 iOS .ipa 檔案 (給 Sideloadly 側載)
         run: |
-          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 | head -n 1)
+          APP_PATH=$(find build/superscan.xcarchive/Products/Applications -name "*.app" | head -n 1)
           echo "找到原生 App: $APP_PATH"
           mkdir -p Payload
           cp -r "$APP_PATH" Payload/

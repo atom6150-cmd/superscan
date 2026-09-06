@@ -27,6 +27,29 @@ jobs:
       - name: 安裝依賴套件
         run: npm ci || npm install
 
+      - name: 修正 Swift Package Tools 版本 (適配 Xcode 16.2 / Swift 6.0)
+        run: |
+          node -e "
+          const fs = require('fs');
+          const path = require('path');
+          function walk(d) {
+            for (let f of fs.readdirSync(d)) {
+              let p = path.join(d, f);
+              if (f === 'Package.swift') {
+                let content = fs.readFileSync(p, 'utf8');
+                if (content.includes('swift-tools-version: 6.2')) {
+                  content = content.replace(/swift-tools-version: 6\.2/g, 'swift-tools-version: 6.0');
+                  fs.writeFileSync(p, content);
+                  console.log('Fixed swift-tools-version in:', p);
+                }
+              } else if (fs.statSync(p).isDirectory() && f !== '.git') {
+                walk(p);
+              }
+            }
+          }
+          walk('node_modules');
+          "
+
       - name: 產生 iOS 原生專案 (Expo Prebuild)
         run: npx expo prebuild --platform ios --clean --no-install
 
@@ -72,9 +95,12 @@ jobs:
           pod install --repo-update
           cd ..
 
-      - name: 解析 Swift Package 相依性 (預先快取 ExpoModulesJSI)
+      - name: 預先編譯 ExpoModulesJSI 原生函式庫 (消除 Xcode 16 內部腳本依賴錯誤)
         run: |
-          xcodebuild -resolvePackageDependencies -workspace ios/superscan.xcworkspace -scheme superscan
+          sed -i '' 's/-disableAutomaticPackageResolution//g' node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh || true
+          export PODS_ROOT="$(pwd)/ios/Pods"
+          export PLATFORM_NAME=iphoneos
+          bash node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh || true
 
       - name: 使用 Xcode 編譯並歸檔 (Archive) 未簽名 iOS 原生應用程式
         run: |

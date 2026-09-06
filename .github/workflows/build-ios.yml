@@ -34,53 +34,7 @@ jobs:
         run: npx expo prebuild --platform ios --clean --no-install
 
       - name: 配置 Podfile 與 Xcode 專案停用程式碼簽名與腳本沙盒 (確保未簽名打包順暢)
-        run: |
-          node -e "
-          const fs = require('fs');
-          
-          // 1. 修改 Podfile 關閉簽名、關閉腳本沙盒並強制以原始碼編譯 Expo 模組 (避免 Swift 版本不相容)
-          let podfile = fs.readFileSync('ios/Podfile', 'utf8');
-          const precompiledOverride = \`
-begin
-  require_relative '../node_modules/expo-modules-autolinking/scripts/ios/precompiled_modules'
-  module Expo
-    module PrecompiledModules
-      def self.enabled?
-        false
-      end
-    end
-  end
-rescue LoadError
-end
-\`;
-          const bypassCode = \`
-              installer.generated_projects.each do |project|
-                project.targets.each do |target|
-                  target.build_configurations.each do |config|
-                    config.build_settings['ENABLE_USER_SCRIPT_SANDBOXING'] = 'NO'
-                    config.build_settings['CODE_SIGNING_ALLOWED'] = 'NO'
-                    config.build_settings['CODE_SIGNING_REQUIRED'] = 'NO'
-                    config.build_settings['CODE_SIGN_IDENTITY'] = ''
-                  end
-                end
-              end
-          \`;
-          podfile = precompiledOverride + '\n' + podfile.replace(/post_install do \|installer\|/, 'post_install do |installer|' + bypassCode);
-          fs.writeFileSync('ios/Podfile', podfile);
-          console.log('Podfile signing, sandboxing bypass & source-build override configured.');
-
-          // 2. 修改主專案 project.pbxproj 停用沙盒與強制開發者團隊檢查
-          const pbxPath = 'ios/superscan.xcodeproj/project.pbxproj';
-          if (fs.existsSync(pbxPath)) {
-            let pbx = fs.readFileSync(pbxPath, 'utf8');
-            pbx = pbx.replace(/ENABLE_USER_SCRIPT_SANDBOXING = YES;/g, 'ENABLE_USER_SCRIPT_SANDBOXING = NO;');
-            pbx = pbx.replace(/CODE_SIGN_STYLE = Automatic;/g, 'CODE_SIGN_STYLE = Manual;');
-            pbx = pbx.replace(/CODE_SIGN_IDENTITY = \"[^\"]*\";/g, 'CODE_SIGN_IDENTITY = \"\";');
-            pbx = pbx.replace(/CODE_SIGNING_ALLOWED = YES;/g, 'CODE_SIGNING_ALLOWED = NO;');
-            fs.writeFileSync(pbxPath, pbx);
-            console.log('Project.pbxproj signing & sandboxing bypass configured.');
-          }
-          "
+        run: node scripts/patch-podfile.js
 
       - name: 安裝 CocoaPods
         run: |

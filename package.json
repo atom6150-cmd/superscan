@@ -13,6 +13,7 @@
     "expo-image-manipulator": "~57.0.16",
     "expo-image-picker": "~57.0.16",
     "expo-media-library": "~57.0.4",
+    "expo-modules-jsi": "57.0.4",
     "expo-print": "~57.0.1",
     "expo-sharing": "~57.0.18",
     "expo-status-bar": "~57.0.1",
@@ -34,6 +35,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web"
+  },
+  "overrides": {
+    "expo-modules-jsi": "57.0.4"
   },
   "private": true
 }

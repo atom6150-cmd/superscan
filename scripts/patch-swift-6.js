@@ -16,6 +16,7 @@ function walkDir(dir, callback) {
   }
 }
 
+// 1. Patch Swift files: modifier ordering and weak var
 function patchSwiftFiles(dir) {
   walkDir(dir, (filePath) => {
     if (!filePath.endsWith('.swift')) return;
@@ -38,19 +39,10 @@ function patchSwiftFiles(dir) {
 
     // Fix original weak let declarations:
     if (content.includes('weak let')) {
-      // 1. nonisolated(unsafe) weak let -> nonisolated(unsafe) weak var (for local variables)
       content = content.replace(/nonisolated\(unsafe\)\s+weak\s+let\b/g, 'nonisolated(unsafe) weak var');
-      
-      // 2. private weak let -> private nonisolated(unsafe) weak var (access modifier first!)
       content = content.replace(/private\s+weak\s+let\b/g, 'private nonisolated(unsafe) weak var');
-      
-      // 3. internal weak let -> internal nonisolated(unsafe) weak var (access modifier first!)
       content = content.replace(/internal\s+weak\s+let\b/g, 'internal nonisolated(unsafe) weak var');
-      
-      // 4. public weak let -> public nonisolated(unsafe) weak var (access modifier first!)
       content = content.replace(/public\s+weak\s+let\b/g, 'public nonisolated(unsafe) weak var');
-      
-      // 5. Any remaining weak let -> nonisolated(unsafe) weak var
       content = content.replace(/\bweak\s+let\b/g, 'nonisolated(unsafe) weak var');
       changed = true;
     }
@@ -63,80 +55,125 @@ function patchSwiftFiles(dir) {
   });
 }
 
+// 2. Patch Task+immediate.swift: replace future Swift 6.2 Task.immediate / Task(name:) with clean polyfill
+function patchTaskImmediate(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('Task+immediate.swift')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    if (content.includes('Task.immediate') || content.includes('Task(name:')) {
+      console.log(`[patched] Task.immediate polyfill in: ${filePath}`);
+      const cleanPolyfill = `// swift-format-ignore-file: AlwaysUseLowerCamelCase
+
+extension Task where Failure == any Error {
+  @discardableResult
+  public static func immediate_polyfill(
+    name: String? = nil,
+    priority: TaskPriority? = nil,
+    @_inheritActorContext @_implicitSelfCapture operation: sending @escaping @isolated(any) () async throws -> Success
+  ) -> Task<Success, any Error> {
+    return Task(priority: priority ?? .high, operation: operation)
+  }
+}
+`;
+      fs.writeFileSync(filePath, cleanPolyfill, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
+// 3. Patch JavaScriptRuntime.swift: remove extraneous consuming: on push_back and trailing commas
+function patchJavaScriptRuntime(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('JavaScriptRuntime.swift')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    let changed = false;
+
+    if (content.includes('vector.push_back(consuming: propNameId)')) {
+      console.log(`[patched] vector.push_back without consuming: label in: ${filePath}`);
+      content = content.replace('vector.push_back(consuming: propNameId)', 'vector.push_back(propNameId)');
+      changed = true;
+    }
+
+    if (content.includes('_ arguments: consuming JavaScriptValuesBuffer,')) {
+      console.log(`[patched] trailing comma in AsyncFunctionClosure in: ${filePath}`);
+      content = content.replace('_ arguments: consuming JavaScriptValuesBuffer,', '_ arguments: consuming JavaScriptValuesBuffer');
+      changed = true;
+    }
+
+    if (changed) {
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
+// 4. Patch Package.swift: tools version (6.2 -> 6.0) and trailing commas
+function patchPackageSwift(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('Package.swift')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    let changed = false;
+
+    if (content.includes('swift-tools-version: 6.2')) {
+      console.log(`[patched] swift-tools-version to 6.0 in: ${filePath}`);
+      content = content.replace(/swift-tools-version:\s*6\.2/g, 'swift-tools-version: 6.0');
+      changed = true;
+    }
+
+    // Remove trailing commas before closing parentheses
+    if (/,(\s*\))/.test(content)) {
+      content = content.replace(/,(\s*\))/g, (m, p1) => p1);
+      changed = true;
+    }
+
+    if (changed) {
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
+// 5. Patch build-xcframework.sh: remove disableAutomaticPackageResolution, -quiet, and enhance env_args
+function patchBuildXcframework(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('build-xcframework.sh')) return;
+    let scriptContent = fs.readFileSync(filePath, 'utf8');
+    let changed = false;
+
+    if (scriptContent.includes('-disableAutomaticPackageResolution')) {
+      console.log(`[patched] Removed -disableAutomaticPackageResolution from: ${filePath}`);
+      scriptContent = scriptContent.replace(/-disableAutomaticPackageResolution \\\r?\n/g, '');
+      changed = true;
+    }
+
+    if (scriptContent.includes('-quiet')) {
+      console.log(`[patched] Removed -quiet from: ${filePath}`);
+      scriptContent = scriptContent.replace(/-quiet \\\r?\n/g, '');
+      changed = true;
+    }
+
+    const oldEnvArgs = 'local env_args=(PATH="$PATH" HOME="$HOME" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")';
+    const newEnvArgs = 'local env_args=(PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" USER="${USER:-runner}" LOGNAME="${LOGNAME:-runner}" CI="${CI:-1}" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")';
+    if (scriptContent.includes(oldEnvArgs)) {
+      console.log(`[patched] Enhanced env_args with TMPDIR, USER, LOGNAME in: ${filePath}`);
+      scriptContent = scriptContent.replace(oldEnvArgs, newEnvArgs);
+      changed = true;
+    }
+
+    if (changed) {
+      fs.writeFileSync(filePath, scriptContent, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
 const nodeModulesDir = path.resolve(__dirname, '..', 'node_modules');
 
-// 1. Patch Swift files in expo-modules-jsi and expo-modules-core
-console.log('Searching for Swift weak let / modifier order in node_modules...');
-patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-jsi'));
-patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-core'));
-
-// 2. Patch trailing comma in JavaScriptRuntime.swift line 402 for Swift 6.0 compatibility
-const jsRuntimeSwiftPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI', 'Runtime', 'JavaScriptRuntime.swift');
-if (fs.existsSync(jsRuntimeSwiftPath)) {
-  let jsRuntimeContent = fs.readFileSync(jsRuntimeSwiftPath, 'utf8');
-  if (jsRuntimeContent.includes('_ arguments: consuming JavaScriptValuesBuffer,')) {
-    console.log(`Patching trailing comma in: ${jsRuntimeSwiftPath}`);
-    jsRuntimeContent = jsRuntimeContent.replace('_ arguments: consuming JavaScriptValuesBuffer,', '_ arguments: consuming JavaScriptValuesBuffer');
-    fs.writeFileSync(jsRuntimeSwiftPath, jsRuntimeContent, 'utf8');
-    patchedFilesCount++;
-  }
-}
-
-// 3. Patch RuntimeScheduler.h SWIFT_RETURNS_RETAINED on constructors
-const runtimeSchedulerPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'Sources', 'ExpoModulesJSI-Cxx', 'include', 'RuntimeScheduler.h');
-if (fs.existsSync(runtimeSchedulerPath)) {
-  let runtimeSchedulerContent = fs.readFileSync(runtimeSchedulerPath, 'utf8');
-  if (runtimeSchedulerContent.includes('SWIFT_RETURNS_RETAINED RuntimeScheduler')) {
-    console.log(`Patching SWIFT_RETURNS_RETAINED constructors in: ${runtimeSchedulerPath}`);
-    runtimeSchedulerContent = runtimeSchedulerContent.replace(/SWIFT_RETURNS_RETAINED\s+RuntimeScheduler\(/g, 'RuntimeScheduler(');
-    fs.writeFileSync(runtimeSchedulerPath, runtimeSchedulerContent, 'utf8');
-    patchedFilesCount++;
-  }
-}
-
-// 4. Patch Package.swift tools version (6.2 -> 6.0 for broad Swift compiler compatibility)
-const packageSwiftPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'Package.swift');
-if (fs.existsSync(packageSwiftPath)) {
-  let packageSwift = fs.readFileSync(packageSwiftPath, 'utf8');
-  if (packageSwift.includes('swift-tools-version: 6.2')) {
-    console.log(`Patching swift-tools-version to 6.0 in: ${packageSwiftPath}`);
-    packageSwift = packageSwift.replace(/swift-tools-version:\s*6\.2/g, 'swift-tools-version: 6.0');
-    fs.writeFileSync(packageSwiftPath, packageSwift, 'utf8');
-    patchedFilesCount++;
-  }
-}
-
-// 5. Patch build-xcframework.sh in expo-modules-jsi
-const buildScriptPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'scripts', 'build-xcframework.sh');
-if (fs.existsSync(buildScriptPath)) {
-  let scriptContent = fs.readFileSync(buildScriptPath, 'utf8');
-  let changed = false;
-
-  if (scriptContent.includes('-disableAutomaticPackageResolution')) {
-    console.log(`Removing -disableAutomaticPackageResolution from: ${buildScriptPath}`);
-    scriptContent = scriptContent.replace(/-disableAutomaticPackageResolution \\\r?\n/g, '');
-    changed = true;
-  }
-
-  if (scriptContent.includes('-quiet')) {
-    console.log(`Removing -quiet from: ${buildScriptPath}`);
-    scriptContent = scriptContent.replace(/-quiet \\\r?\n/g, '');
-    changed = true;
-  }
-
-  // Ensure env_args carries critical environment variables into the nested xcodebuild
-  const oldEnvArgs = 'local env_args=(PATH="$PATH" HOME="$HOME" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")';
-  const newEnvArgs = 'local env_args=(PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" USER="${USER:-runner}" LOGNAME="${LOGNAME:-runner}" CI="${CI:-1}" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")';
-  if (scriptContent.includes(oldEnvArgs)) {
-    console.log(`Enhancing env_args with TMPDIR, USER, LOGNAME in: ${buildScriptPath}`);
-    scriptContent = scriptContent.replace(oldEnvArgs, newEnvArgs);
-    changed = true;
-  }
-
-  if (changed) {
-    fs.writeFileSync(buildScriptPath, scriptContent, 'utf8');
-    patchedFilesCount++;
-  }
-}
+console.log('--- Applying Swift 6 & Xcode 16.4 compatibility patches ---');
+patchSwiftFiles(nodeModulesDir);
+patchTaskImmediate(nodeModulesDir);
+patchJavaScriptRuntime(nodeModulesDir);
+patchPackageSwift(nodeModulesDir);
+patchBuildXcframework(nodeModulesDir);
 
 console.log(`Patch completed successfully. Total files touched: ${patchedFilesCount}`);

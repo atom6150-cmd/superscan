@@ -152,23 +152,32 @@ function patchRuntimeScheduler(dir) {
   });
 }
 
-// 6. Patch HostFunctionClosure.h: add SWIFT_NAME init factory for Swift C++ reference import
+// 6. Patch HostFunctionClosure.h: add SWIFT_NAME init factory for Swift C++ reference import (immortal reference)
 function patchHostFunctionClosure(dir) {
   walkDir(dir, (filePath) => {
     if (!filePath.endsWith('HostFunctionClosure.h') || !filePath.includes('expo-modules-jsi')) return;
     let content = fs.readFileSync(filePath, 'utf8');
-    if (!content.includes('SWIFT_NAME("init(_:_:_:)")')) {
+    let changed = false;
+
+    // Remove SWIFT_RETURNS_UNRETAINED if present (invalid for SWIFT_IMMORTAL_REFERENCE)
+    if (content.includes('SWIFT_RETURNS_UNRETAINED')) {
+      content = content.replace(/#ifndef SWIFT_RETURNS_UNRETAINED[\s\S]*?#endif\r?\n/, '');
+      content = content.replace(/SWIFT_RETURNS_UNRETAINED\s+/g, '');
+      changed = true;
+    }
+
+    if (!content.includes('HostFunctionClosure *create')) {
       console.log(`[patched] Adding SWIFT_NAME init factory method in: ${filePath}`);
       const factoryMethod = `
-#ifndef SWIFT_RETURNS_UNRETAINED
-#define SWIFT_RETURNS_UNRETAINED __attribute__((swift_attr("returns_unretained")))
-#endif
-
-  static inline SWIFT_RETURNS_UNRETAINED HostFunctionClosure *create(Context context, Closure closure, Deallocator deallocator) SWIFT_NAME("init(_:_:_:)") {
+  static inline HostFunctionClosure *create(Context context, Closure closure, Deallocator deallocator) SWIFT_NAME("init(_:_:_:)") {
     return new HostFunctionClosure(context, closure, deallocator);
   }
 `;
       content = content.replace(/explicit HostFunctionClosure\([^)]*\)\s*:[^;]*;/, (match) => match + '\n' + factoryMethod);
+      changed = true;
+    }
+
+    if (changed) {
       fs.writeFileSync(filePath, content, 'utf8');
       patchedFilesCount++;
     }

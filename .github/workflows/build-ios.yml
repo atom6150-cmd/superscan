@@ -77,6 +77,7 @@ jobs:
 
       - name: 預先編譯 ExpoModulesJSI.xcframework (跳過 Xcode 內嵌腳本沙盒限制)
         run: |
+          set -o pipefail
           cd node_modules/expo-modules-jsi/apple
           export PODS_ROOT="$GITHUB_WORKSPACE/ios/Pods"
           export RN_ROOT="$GITHUB_WORKSPACE/node_modules/react-native"

@@ -13,6 +13,11 @@ jobs:
       - name: 檢出程式碼
         uses: actions/checkout@v4
 
+      - name: 設定 Xcode 16.2 版本 (React Native 0.86+ 要求 >= 16.1)
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.2.app
+          xcodebuild -version
+
       - name: 安裝 Node.js
         uses: actions/setup-node@v4
         with:
@@ -23,12 +28,12 @@ jobs:
         run: npm ci || npm install
 
       - name: 產生 iOS 原生專案 (Expo Prebuild)
-        run: npx expo prebuild --platform ios --clean
+        run: npx expo prebuild --platform ios --clean --no-install
 
       - name: 安裝 CocoaPods
         run: |
           cd ios
-          pod install
+          pod install --repo-update
           cd ..
 
       - name: 使用 Xcode 編譯未簽名 iOS 原生應用程式
@@ -40,12 +45,15 @@ jobs:
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
 
       - name: 打包成標準 iOS .ipa 檔案 (給 Sideloadly 側載)
         run: |
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 | head -n 1)
+          echo "找到原生 App: $APP_PATH"
           mkdir -p Payload
-          cp -r build/Build/Products/Release-iphoneos/superscan.app Payload/
+          cp -r "$APP_PATH" Payload/
           zip -r superscan.ipa Payload
           echo "打包完成，superscan.ipa 檔案大小："
           ls -lh superscan.ipa

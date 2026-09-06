@@ -81,23 +81,138 @@ extension Task where Failure == any Error {
   });
 }
 
-// 3. Patch JavaScriptRuntime.swift: move propNameId with consume and remove trailing commas
+// 3. Patch HostObjectCallbacks.h: add C++ appendPropNameId helper so Swift doesn't touch deleted copy constructor
+function patchHostObjectCallbacks(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('HostObjectCallbacks.h') || !filePath.includes('expo-modules-jsi')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    if (!content.includes('appendPropNameId')) {
+      console.log(`[patched] Adding appendPropNameId helper in: ${filePath}`);
+      const helper = `
+inline void appendPropNameId(HostObjectCallbacks::PropNameIds &vector, facebook::jsi::Runtime &runtime, const std::string &name) {
+  vector.push_back(facebook::jsi::PropNameID::forUtf8(runtime, name));
+}
+`;
+      content = content.replace('} SWIFT_NONCOPYABLE; // class HostObjectCallbacks', '} SWIFT_NONCOPYABLE; // class HostObjectCallbacks\n' + helper);
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
+// 4. Patch RuntimeScheduler.h: add createRuntimeScheduler factory functions
+function patchRuntimeScheduler(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('RuntimeScheduler.h') || !filePath.includes('expo-modules-jsi')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    let changed = false;
+
+    // Clean up any inner create methods if previously injected into class body
+    if (content.includes('static inline SWIFT_RETURNS_RETAINED RuntimeScheduler *create')) {
+      content = content.replace(/#ifndef SWIFT_RETURNS_RETAINED[\s\S]*?static inline SWIFT_RETURNS_RETAINED RuntimeScheduler \*create\(\) SWIFT_NAME\("init\(\)"\)\s*\{\s*return new RuntimeScheduler\(\);\s*\}\s*/g, '');
+      changed = true;
+    }
+
+    if (!content.includes('createRuntimeScheduler')) {
+      console.log(`[patched] Adding createRuntimeScheduler helpers in: ${filePath}`);
+      const factoryMethods = `
+namespace expo {
+#ifndef SWIFT_RETURNS_RETAINED
+#define SWIFT_RETURNS_RETAINED __attribute__((swift_attr("returns_retained")))
+#endif
+
+inline SWIFT_RETURNS_RETAINED RuntimeScheduler *createRuntimeScheduler(void *scheduler, RuntimeScheduler::ScheduleFn fn) {
+  return new RuntimeScheduler(scheduler, fn);
+}
+
+inline SWIFT_RETURNS_RETAINED RuntimeScheduler *createRuntimeScheduler() {
+  return new RuntimeScheduler();
+}
+} // namespace expo
+`;
+      content = content.replace(/inline void releaseRuntimeScheduler\(expo::RuntimeScheduler \*scheduler\)\s*\{\s*scheduler->release\(\);\s*\}/, (match) => match + '\n' + factoryMethods);
+      changed = true;
+    }
+
+    if (changed) {
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
+// 5. Patch HostFunctionClosure.h: add createHostFunctionClosure factory function
+function patchHostFunctionClosure(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('HostFunctionClosure.h') || !filePath.includes('expo-modules-jsi')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    let changed = false;
+
+    // Clean up any inner create methods if previously injected into class body
+    if (content.includes('static inline HostFunctionClosure *create(') || content.includes('SWIFT_RETURNS_UNRETAINED')) {
+      content = content.replace(/#ifndef SWIFT_RETURNS_UNRETAINED[\s\S]*?#endif\r?\n/g, '');
+      content = content.replace(/\s*static inline (?:SWIFT_RETURNS_UNRETAINED )?HostFunctionClosure \*create\([^)]*\)[^{]*\{[^}]*\}\s*/g, '\n');
+      changed = true;
+    }
+
+    if (!content.includes('createHostFunctionClosure')) {
+      console.log(`[patched] Adding createHostFunctionClosure helper in: ${filePath}`);
+      const factoryMethod = `
+namespace expo {
+inline HostFunctionClosure *createHostFunctionClosure(HostFunctionClosure::Context context, HostFunctionClosure::Closure closure, HostFunctionClosure::Deallocator deallocator) {
+  return new HostFunctionClosure(context, closure, deallocator);
+}
+} // namespace expo
+`;
+      content = content.replace('} SWIFT_IMMORTAL_REFERENCE; // class HostFunctionClosure', '} SWIFT_IMMORTAL_REFERENCE; // class HostFunctionClosure\n' + factoryMethod);
+      changed = true;
+    }
+
+    if (changed) {
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
+// 6. Patch JavaScriptRuntime.swift: wire createRuntimeScheduler, createHostFunctionClosure, and appendPropNameId
 function patchJavaScriptRuntime(dir) {
   walkDir(dir, (filePath) => {
     if (!filePath.endsWith('JavaScriptRuntime.swift')) return;
     let content = fs.readFileSync(filePath, 'utf8');
     let changed = false;
 
-    if (content.includes('vector.push_back(consuming: propNameId)')) {
-      console.log(`[patched] vector.push_back(consume propNameId) in: ${filePath}`);
-      content = content.replace('vector.push_back(consuming: propNameId)', 'vector.push_back(consume propNameId)');
+    // 1. Replace self.scheduler = expo.RuntimeScheduler(...) with expo.createRuntimeScheduler(...)
+    if (content.includes('self.scheduler = expo.RuntimeScheduler()')) {
+      console.log(`[patched] expo.createRuntimeScheduler() in: ${filePath}`);
+      content = content.replace(/self\.scheduler = expo\.RuntimeScheduler\(\)/g, 'self.scheduler = expo.createRuntimeScheduler()');
       changed = true;
-    } else if (content.includes('vector.push_back(propNameId)')) {
-      console.log(`[patched] vector.push_back(consume propNameId) in: ${filePath}`);
-      content = content.replace('vector.push_back(propNameId)', 'vector.push_back(consume propNameId)');
+    }
+    if (content.includes('self.scheduler = expo.RuntimeScheduler(scheduler, fn)')) {
+      console.log(`[patched] expo.createRuntimeScheduler(scheduler, fn) in: ${filePath}`);
+      content = content.replace('self.scheduler = expo.RuntimeScheduler(scheduler, fn)', 'self.scheduler = expo.createRuntimeScheduler(scheduler, fn)');
       changed = true;
     }
 
+    // 2. Replace return expo.HostFunctionClosure(...) with return expo.createHostFunctionClosure(...)
+    if (content.includes('return expo.HostFunctionClosure(context, call, deallocate)')) {
+      console.log(`[patched] expo.createHostFunctionClosure in: ${filePath}`);
+      content = content.replace(/return expo\.HostFunctionClosure\(context, call, deallocate\)/g, 'return expo.createHostFunctionClosure(context, call, deallocate)');
+      changed = true;
+    }
+
+    // 3. Replace propertyNames loop with appendPropNameId
+    if (content.includes('vector.push_back')) {
+      console.log(`[patched] expo.appendPropNameId in: ${filePath}`);
+      const oldLoop = /for propertyName in propertyNames\s*\{[\s\S]*?vector\.push_back\([^)]*\)\s*\}/;
+      const newLoop = `for propertyName in propertyNames {
+        expo.appendPropNameId(&vector, runtime.pointee, std.string(propertyName))
+      }`;
+      content = content.replace(oldLoop, newLoop);
+      changed = true;
+    }
+
+    // 4. Trailing comma in AsyncFunctionClosure
     if (content.includes('_ arguments: consuming JavaScriptValuesBuffer,')) {
       console.log(`[patched] trailing comma in AsyncFunctionClosure in: ${filePath}`);
       content = content.replace('_ arguments: consuming JavaScriptValuesBuffer,', '_ arguments: consuming JavaScriptValuesBuffer');
@@ -111,7 +226,7 @@ function patchJavaScriptRuntime(dir) {
   });
 }
 
-// 4. Patch JavaScriptCodable+Date.swift: fix ambiguous abs(Double) in Swift 6 with C++ interop
+// 7. Patch JavaScriptCodable+Date.swift: fix ambiguous abs(Double) in Swift 6 with C++ interop
 function patchDateCoding(dir) {
   walkDir(dir, (filePath) => {
     if (!filePath.endsWith('JavaScriptCodable+Date.swift')) return;
@@ -125,66 +240,7 @@ function patchDateCoding(dir) {
   });
 }
 
-// 5. Patch RuntimeScheduler.h: add SWIFT_NAME init factories for Swift C++ reference import
-function patchRuntimeScheduler(dir) {
-  walkDir(dir, (filePath) => {
-    if (!filePath.endsWith('RuntimeScheduler.h') || !filePath.includes('expo-modules-jsi')) return;
-    let content = fs.readFileSync(filePath, 'utf8');
-    if (!content.includes('SWIFT_NAME("init()")')) {
-      console.log(`[patched] Adding SWIFT_NAME init factory methods in: ${filePath}`);
-      const factoryMethods = `
-#ifndef SWIFT_RETURNS_RETAINED
-#define SWIFT_RETURNS_RETAINED __attribute__((swift_attr("returns_retained")))
-#endif
-
-  static inline SWIFT_RETURNS_RETAINED RuntimeScheduler *create(void *scheduler, ScheduleFn fn) SWIFT_NAME("init(_:_:)") {
-    return new RuntimeScheduler(scheduler, fn);
-  }
-
-  static inline SWIFT_RETURNS_RETAINED RuntimeScheduler *create() SWIFT_NAME("init()") {
-    return new RuntimeScheduler();
-  }
-`;
-      content = content.replace('RuntimeScheduler(const RuntimeScheduler &) = delete;', 'RuntimeScheduler(const RuntimeScheduler &) = delete;\n' + factoryMethods);
-      fs.writeFileSync(filePath, content, 'utf8');
-      patchedFilesCount++;
-    }
-  });
-}
-
-// 6. Patch HostFunctionClosure.h: add SWIFT_NAME init factory for Swift C++ reference import (immortal reference)
-function patchHostFunctionClosure(dir) {
-  walkDir(dir, (filePath) => {
-    if (!filePath.endsWith('HostFunctionClosure.h') || !filePath.includes('expo-modules-jsi')) return;
-    let content = fs.readFileSync(filePath, 'utf8');
-    let changed = false;
-
-    // Remove SWIFT_RETURNS_UNRETAINED if present (invalid for SWIFT_IMMORTAL_REFERENCE)
-    if (content.includes('SWIFT_RETURNS_UNRETAINED')) {
-      content = content.replace(/#ifndef SWIFT_RETURNS_UNRETAINED[\s\S]*?#endif\r?\n/, '');
-      content = content.replace(/SWIFT_RETURNS_UNRETAINED\s+/g, '');
-      changed = true;
-    }
-
-    if (!content.includes('HostFunctionClosure *create')) {
-      console.log(`[patched] Adding SWIFT_NAME init factory method in: ${filePath}`);
-      const factoryMethod = `
-  static inline HostFunctionClosure *create(Context context, Closure closure, Deallocator deallocator) SWIFT_NAME("init(_:_:_:)") {
-    return new HostFunctionClosure(context, closure, deallocator);
-  }
-`;
-      content = content.replace(/explicit HostFunctionClosure\([^)]*\)\s*:[^;]*;/, (match) => match + '\n' + factoryMethod);
-      changed = true;
-    }
-
-    if (changed) {
-      fs.writeFileSync(filePath, content, 'utf8');
-      patchedFilesCount++;
-    }
-  });
-}
-
-// 7. Patch Package.swift: tools version (6.2 -> 6.0) and trailing commas
+// 8. Patch Package.swift: tools version (6.2 -> 6.0) and trailing commas
 function patchPackageSwift(dir) {
   walkDir(dir, (filePath) => {
     if (!filePath.endsWith('Package.swift')) return;
@@ -249,10 +305,11 @@ const nodeModulesDir = path.resolve(__dirname, '..', 'node_modules');
 console.log('--- Applying Swift 6 & Xcode 16.4 compatibility patches ---');
 patchSwiftFiles(nodeModulesDir);
 patchTaskImmediate(nodeModulesDir);
-patchJavaScriptRuntime(nodeModulesDir);
-patchDateCoding(nodeModulesDir);
+patchHostObjectCallbacks(nodeModulesDir);
 patchRuntimeScheduler(nodeModulesDir);
 patchHostFunctionClosure(nodeModulesDir);
+patchJavaScriptRuntime(nodeModulesDir);
+patchDateCoding(nodeModulesDir);
 patchPackageSwift(nodeModulesDir);
 patchBuildXcframework(nodeModulesDir);
 

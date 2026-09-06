@@ -30,11 +30,13 @@ jobs:
       - name: 產生 iOS 原生專案 (Expo Prebuild)
         run: npx expo prebuild --platform ios --clean --no-install
 
-      - name: 配置 Podfile 停用原生庫簽名 (防止 Xcode 16 Privacy Bundle 報錯)
+      - name: 配置 Podfile 與 Xcode 專案停用程式碼簽名 (確保免開發者帳號未簽名打包)
         run: |
           node -e "
           const fs = require('fs');
-          let content = fs.readFileSync('ios/Podfile', 'utf8');
+          
+          // 1. 修改 Podfile 確保所有相依庫與 Privacy Bundle 關閉簽名
+          let podfile = fs.readFileSync('ios/Podfile', 'utf8');
           const bypassCode = \`
               installer.generated_projects.each do |project|
                 project.targets.each do |target|
@@ -46,9 +48,20 @@ jobs:
                 end
               end
           \`;
-          content = content.replace(/post_install do \|installer\|/, 'post_install do |installer|' + bypassCode);
-          fs.writeFileSync('ios/Podfile', content);
+          podfile = podfile.replace(/post_install do \|installer\|/, 'post_install do |installer|' + bypassCode);
+          fs.writeFileSync('ios/Podfile', podfile);
           console.log('Podfile signing bypass configured.');
+
+          // 2. 修改主專案 project.pbxproj 停用強制開發者團隊檢查
+          const pbxPath = 'ios/superscan.xcodeproj/project.pbxproj';
+          if (fs.existsSync(pbxPath)) {
+            let pbx = fs.readFileSync(pbxPath, 'utf8');
+            pbx = pbx.replace(/CODE_SIGN_STYLE = Automatic;/g, 'CODE_SIGN_STYLE = Manual;');
+            pbx = pbx.replace(/CODE_SIGN_IDENTITY = \"[^\"]*\";/g, 'CODE_SIGN_IDENTITY = \"\";');
+            pbx = pbx.replace(/CODE_SIGNING_ALLOWED = YES;/g, 'CODE_SIGNING_ALLOWED = NO;');
+            fs.writeFileSync(pbxPath, pbx);
+            console.log('Project.pbxproj signing bypass configured.');
+          }
           "
 
       - name: 安裝 CocoaPods
@@ -59,18 +72,21 @@ jobs:
 
       - name: 使用 Xcode 編譯並歸檔 (Archive) 未簽名 iOS 原生應用程式
         run: |
+          set -o pipefail
           xcodebuild archive \
             -workspace ios/superscan.xcworkspace \
             -scheme superscan \
             -configuration Release \
-            -destination 'generic/platform=iOS' \
             -archivePath build/superscan.xcarchive \
-            CODE_SIGN_STYLE=Manual \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            COMPILER_INDEX_STORE_ENABLE=NO
+            COMPILER_INDEX_STORE_ENABLE=NO 2>&1 | tee xcodebuild.log || {
+              echo "==================== BUILD ERROR SUMMARY ===================="
+              grep -E "(error: |fatal error: |\*\* BUILD FAILED \*\*)" xcodebuild.log || tail -n 80 xcodebuild.log
+              echo "============================================================="
+              exit 1
+            }
 
       - name: 打包成標準 iOS .ipa 檔案 (給 Sideloadly 側載)
         run: |

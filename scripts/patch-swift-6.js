@@ -155,14 +155,18 @@ function patchHostFunctionClosure(dir) {
       changed = true;
     }
 
+    // Clean up any nested namespace expo around createHostFunctionClosure
+    if (content.includes('namespace expo {\ninline HostFunctionClosure *createHostFunctionClosure')) {
+      content = content.replace(/namespace expo \{\s*inline HostFunctionClosure \*createHostFunctionClosure[\s\S]*?\} \/\/ namespace expo\r?\n/g, '');
+      changed = true;
+    }
+
     if (!content.includes('createHostFunctionClosure')) {
       console.log(`[patched] Adding createHostFunctionClosure helper in: ${filePath}`);
       const factoryMethod = `
-namespace expo {
 inline HostFunctionClosure *createHostFunctionClosure(HostFunctionClosure::Context context, HostFunctionClosure::Closure closure, HostFunctionClosure::Deallocator deallocator) {
   return new HostFunctionClosure(context, closure, deallocator);
 }
-} // namespace expo
 `;
       content = content.replace('} SWIFT_IMMORTAL_REFERENCE; // class HostFunctionClosure', '} SWIFT_IMMORTAL_REFERENCE; // class HostFunctionClosure\n' + factoryMethod);
       changed = true;

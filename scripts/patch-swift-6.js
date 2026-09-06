@@ -1,0 +1,74 @@
+const fs = require('fs');
+const path = require('path');
+
+let patchedFilesCount = 0;
+
+function walkDir(dir, callback) {
+  if (!fs.existsSync(dir)) return;
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walkDir(fullPath, callback);
+    } else if (entry.isFile()) {
+      callback(fullPath);
+    }
+  }
+}
+
+function patchSwiftFiles(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('.swift')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    if (content.includes('weak let')) {
+      console.log(`Patching Swift weak let in: ${filePath}`);
+      
+      // 1. nonisolated(unsafe) weak let -> nonisolated(unsafe) weak var
+      content = content.replace(/nonisolated\(unsafe\)\s+weak\s+let\b/g, 'nonisolated(unsafe) weak var');
+      
+      // 2. private weak let -> nonisolated(unsafe) private weak var
+      content = content.replace(/private\s+weak\s+let\b/g, 'nonisolated(unsafe) private weak var');
+      
+      // 3. internal weak let -> nonisolated(unsafe) internal weak var
+      content = content.replace(/internal\s+weak\s+let\b/g, 'nonisolated(unsafe) internal weak var');
+      
+      // 4. public weak let -> nonisolated(unsafe) public weak var
+      content = content.replace(/public\s+weak\s+let\b/g, 'nonisolated(unsafe) public weak var');
+      
+      // 5. Any remaining weak let -> nonisolated(unsafe) weak var
+      content = content.replace(/\bweak\s+let\b/g, 'nonisolated(unsafe) weak var');
+      
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
+// 1. Patch Swift files in expo-modules-jsi and expo-modules-core
+const nodeModulesDir = path.resolve(__dirname, '..', 'node_modules');
+console.log('Searching for Swift 6.2 weak let occurrences in node_modules...');
+patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-jsi'));
+patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-core'));
+
+// 2. Patch build-xcframework.sh in expo-modules-jsi
+const buildScriptPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'scripts', 'build-xcframework.sh');
+if (fs.existsSync(buildScriptPath)) {
+  let scriptContent = fs.readFileSync(buildScriptPath, 'utf8');
+  let changed = false;
+  if (scriptContent.includes('-disableAutomaticPackageResolution')) {
+    console.log(`Removing -disableAutomaticPackageResolution from: ${buildScriptPath}`);
+    scriptContent = scriptContent.replace(/-disableAutomaticPackageResolution \\\r?\n/g, '');
+    changed = true;
+  }
+  if (scriptContent.includes('-quiet')) {
+    console.log(`Removing -quiet from: ${buildScriptPath}`);
+    scriptContent = scriptContent.replace(/-quiet \\\r?\n/g, '');
+    changed = true;
+  }
+  if (changed) {
+    fs.writeFileSync(buildScriptPath, scriptContent, 'utf8');
+    patchedFilesCount++;
+  }
+}
+
+console.log(`Patch completed successfully. Total files patched: ${patchedFilesCount}`);

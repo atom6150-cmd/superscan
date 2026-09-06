@@ -27,6 +27,9 @@ jobs:
       - name: 安裝依賴套件
         run: npm ci || npm install
 
+      - name: 修復 Swift 6.2 與 Xcode 相容性 (修復 expo-modules-jsi weak let 與 SPM 解析)
+        run: node scripts/patch-swift-6.js
+
       - name: 產生 iOS 原生專案 (Expo Prebuild)
         run: npx expo prebuild --platform ios --clean --no-install
 
@@ -79,6 +82,7 @@ jobs:
             -workspace ios/superscan.xcworkspace \
             -scheme superscan \
             -configuration Release \
+            -destination "generic/platform=iOS" \
             -archivePath build/superscan.xcarchive \
             ENABLE_USER_SCRIPT_SANDBOXING=NO \
             CODE_SIGNING_ALLOWED=NO \

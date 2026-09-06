@@ -482,6 +482,38 @@ function patchPodspecsSwiftVersion(dir) {
   });
 }
 
+// 12. Patch expo-image-picker: remove unreleased iOS 26 contentType member access
+function patchImagePicker(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('MediaHandler.swift') || !filePath.includes('expo-image-picker')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    let changed = false;
+
+    if (content.includes('asset?.contentType')) {
+      console.log(`[patched] PHAsset.contentType fallback in: ${filePath}`);
+      content = content.replace(
+        /let utType: UTType\? = if #available\(iOS 26\.0, \*\) \{\s*asset\?\.contentType \?\? UTType\(filenameExtension: fileExtension\)\s*\} else \{\s*UTType\(filenameExtension: fileExtension\)\s*\}/,
+        'let utType: UTType? = UTType(filenameExtension: fileExtension)'
+      );
+      changed = true;
+    }
+
+    if (content.includes('resource.contentType')) {
+      console.log(`[patched] PHAssetResource.contentType fallback in: ${filePath}`);
+      content = content.replace(
+        /let utType: UTType\? = if #available\(iOS 26\.0, \*\) \{\s*resource\.contentType\s*\} else \{\s*UTType\(resource\.uniformTypeIdentifier\) \?\? UTType\(filenameExtension: fileExtension\)\s*\}/,
+        'let utType: UTType? = UTType(resource.uniformTypeIdentifier) ?? UTType(filenameExtension: fileExtension)'
+      );
+      changed = true;
+    }
+
+    if (changed) {
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
 const nodeModulesDir = path.resolve(__dirname, '..', 'node_modules');
 
 console.log('--- Applying Swift 6 & Xcode 16.4 compatibility patches ---');
@@ -497,7 +529,9 @@ patchBuildXcframework(nodeModulesDir);
 patchPrecompiledModules(nodeModulesDir);
 patchExpoModulesCoreMainActor(nodeModulesDir);
 patchPodspecsSwiftVersion(nodeModulesDir);
+patchImagePicker(nodeModulesDir);
 
 console.log(`Patch completed successfully. Total files touched: ${patchedFilesCount}`);
+
 
 

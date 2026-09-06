@@ -320,6 +320,23 @@ function patchBuildXcframework(dir) {
   });
 }
 
+// 9. Patch precompiled_modules.rb: disable precompiled modules so all Expo modules build from source with the local Swift compiler
+function patchPrecompiledModules(dir) {
+  walkDir(dir, (filePath) => {
+    if (!filePath.endsWith('precompiled_modules.rb') || !filePath.includes('expo-modules-autolinking')) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    if (content.includes('def enabled?') && !content.includes('return false # disabled by patch')) {
+      console.log(`[patched] Disabled precompiled modules in: ${filePath}`);
+      content = content.replace(
+        /def enabled\?[\s\S]*?end\r?\n\r?\n\s*def configure/m,
+        'def enabled?\n        return false # disabled by patch\n      end\n\n      def configure'
+      );
+      fs.writeFileSync(filePath, content, 'utf8');
+      patchedFilesCount++;
+    }
+  });
+}
+
 const nodeModulesDir = path.resolve(__dirname, '..', 'node_modules');
 
 console.log('--- Applying Swift 6 & Xcode 16.4 compatibility patches ---');
@@ -332,5 +349,7 @@ patchJavaScriptRuntime(nodeModulesDir);
 patchDateCoding(nodeModulesDir);
 patchPackageSwift(nodeModulesDir);
 patchBuildXcframework(nodeModulesDir);
+patchPrecompiledModules(nodeModulesDir);
 
 console.log(`Patch completed successfully. Total files touched: ${patchedFilesCount}`);
+

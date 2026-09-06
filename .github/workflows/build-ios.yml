@@ -38,8 +38,21 @@ jobs:
           node -e "
           const fs = require('fs');
           
-          // 1. 修改 Podfile 關閉簽名並關閉腳本沙盒
+          // 1. 修改 Podfile 關閉簽名、關閉腳本沙盒並強制以原始碼編譯 Expo 模組 (避免 Swift 版本不相容)
           let podfile = fs.readFileSync('ios/Podfile', 'utf8');
+          const precompiledOverride = \`
+begin
+  require_relative '../node_modules/expo-modules-autolinking/scripts/ios/precompiled_modules'
+  module Expo
+    module PrecompiledModules
+      def self.enabled?
+        false
+      end
+    end
+  end
+rescue LoadError
+end
+\`;
           const bypassCode = \`
               installer.generated_projects.each do |project|
                 project.targets.each do |target|
@@ -52,9 +65,9 @@ jobs:
                 end
               end
           \`;
-          podfile = podfile.replace(/post_install do \|installer\|/, 'post_install do |installer|' + bypassCode);
+          podfile = precompiledOverride + '\n' + podfile.replace(/post_install do \|installer\|/, 'post_install do |installer|' + bypassCode);
           fs.writeFileSync('ios/Podfile', podfile);
-          console.log('Podfile signing & sandboxing bypass configured.');
+          console.log('Podfile signing, sandboxing bypass & source-build override configured.');
 
           // 2. 修改主專案 project.pbxproj 停用沙盒與強制開發者團隊檢查
           const pbxPath = 'ios/superscan.xcodeproj/project.pbxproj';
@@ -72,6 +85,8 @@ jobs:
       - name: 安裝 CocoaPods
         run: |
           cd ios
+          export EXPO_USE_PRECOMPILED_MODULES=0
+          export EXPO_USE_SOURCE=1
           pod install --repo-update
           cd ..
 
@@ -93,6 +108,8 @@ jobs:
       - name: 使用 Xcode 編譯並歸檔 (Archive) 未簽名 iOS 原生應用程式
         run: |
           set -o pipefail
+          export EXPO_USE_PRECOMPILED_MODULES=0
+          export EXPO_USE_SOURCE=1
           xcodebuild archive \
             -workspace ios/superscan.xcworkspace \
             -scheme superscan \

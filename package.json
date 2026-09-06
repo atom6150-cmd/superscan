@@ -39,5 +39,13 @@
   "overrides": {
     "expo-modules-jsi": "57.0.4"
   },
+  "expo": {
+    "autolinking": {
+      "buildFromSource": [
+        ".*"
+      ]
+    }
+  },
   "private": true
 }
+

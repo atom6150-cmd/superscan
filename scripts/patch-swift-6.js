@@ -44,31 +44,56 @@ function patchSwiftFiles(dir) {
   });
 }
 
-// 1. Patch Swift files in expo-modules-jsi and expo-modules-core
 const nodeModulesDir = path.resolve(__dirname, '..', 'node_modules');
-console.log('Searching for Swift 6.2 weak let occurrences in node_modules...');
+
+// 1. Patch Swift files in expo-modules-jsi and expo-modules-core
+console.log('Searching for Swift weak let occurrences in node_modules...');
 patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-jsi'));
 patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-core'));
 
-// 2. Patch build-xcframework.sh in expo-modules-jsi
+// 2. Patch Package.swift tools version (6.2 -> 6.0 for broad Swift compiler compatibility)
+const packageSwiftPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'Package.swift');
+if (fs.existsSync(packageSwiftPath)) {
+  let packageSwift = fs.readFileSync(packageSwiftPath, 'utf8');
+  if (packageSwift.includes('swift-tools-version: 6.2')) {
+    console.log(`Patching swift-tools-version to 6.0 in: ${packageSwiftPath}`);
+    packageSwift = packageSwift.replace(/swift-tools-version:\s*6\.2/g, 'swift-tools-version: 6.0');
+    fs.writeFileSync(packageSwiftPath, packageSwift, 'utf8');
+    patchedFilesCount++;
+  }
+}
+
+// 3. Patch build-xcframework.sh in expo-modules-jsi
 const buildScriptPath = path.join(nodeModulesDir, 'expo-modules-jsi', 'apple', 'scripts', 'build-xcframework.sh');
 if (fs.existsSync(buildScriptPath)) {
   let scriptContent = fs.readFileSync(buildScriptPath, 'utf8');
   let changed = false;
+
   if (scriptContent.includes('-disableAutomaticPackageResolution')) {
     console.log(`Removing -disableAutomaticPackageResolution from: ${buildScriptPath}`);
     scriptContent = scriptContent.replace(/-disableAutomaticPackageResolution \\\r?\n/g, '');
     changed = true;
   }
+
   if (scriptContent.includes('-quiet')) {
     console.log(`Removing -quiet from: ${buildScriptPath}`);
     scriptContent = scriptContent.replace(/-quiet \\\r?\n/g, '');
     changed = true;
   }
+
+  // Ensure env_args carries critical environment variables into the nested xcodebuild
+  const oldEnvArgs = 'local env_args=(PATH="$PATH" HOME="$HOME" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")';
+  const newEnvArgs = 'local env_args=(PATH="$PATH" HOME="$HOME" TMPDIR="${TMPDIR:-/tmp}" USER="${USER:-runner}" LOGNAME="${LOGNAME:-runner}" CI="${CI:-1}" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")';
+  if (scriptContent.includes(oldEnvArgs)) {
+    console.log(`Enhancing env_args with TMPDIR, USER, LOGNAME in: ${buildScriptPath}`);
+    scriptContent = scriptContent.replace(oldEnvArgs, newEnvArgs);
+    changed = true;
+  }
+
   if (changed) {
     fs.writeFileSync(buildScriptPath, scriptContent, 'utf8');
     patchedFilesCount++;
   }
 }
 
-console.log(`Patch completed successfully. Total files patched: ${patchedFilesCount}`);
+console.log(`Patch completed successfully. Total files touched: ${patchedFilesCount}`);

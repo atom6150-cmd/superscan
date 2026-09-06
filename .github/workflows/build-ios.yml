@@ -75,6 +75,15 @@ jobs:
           pod install --repo-update
           cd ..
 
+      - name: 預先編譯 ExpoModulesJSI.xcframework (跳過 Xcode 內嵌腳本沙盒限制)
+        run: |
+          cd node_modules/expo-modules-jsi/apple
+          export PODS_ROOT="$GITHUB_WORKSPACE/ios/Pods"
+          export RN_ROOT="$GITHUB_WORKSPACE/node_modules/react-native"
+          export PLATFORM_NAME="iphoneos"
+          ./scripts/build-xcframework.sh
+          cd "$GITHUB_WORKSPACE"
+
       - name: 使用 Xcode 編譯並歸檔 (Archive) 未簽名 iOS 原生應用程式
         run: |
           set -o pipefail
@@ -89,9 +98,11 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             COMPILER_INDEX_STORE_ENABLE=NO 2>&1 | tee xcodebuild.log || {
-              echo "==================== BUILD ERROR SUMMARY ===================="
-              grep -E "(error: |fatal error: |\*\* BUILD FAILED \*\*)" xcodebuild.log || tail -n 80 xcodebuild.log
-              echo "============================================================="
+              echo "==================== MATCHED ERRORS WITH CONTEXT ===================="
+              grep -C 10 -E "(error: |fatal error: |\*\* ARCHIVE FAILED \*\*|\*\* BUILD FAILED \*\*)" xcodebuild.log || true
+              echo "==================== LAST 100 LINES OF BUILD LOG ===================="
+              tail -n 100 xcodebuild.log
+              echo "======================================================================"
               exit 1
             }
 

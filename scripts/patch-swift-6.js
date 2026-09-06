@@ -433,7 +433,33 @@ function patchExpoModulesCoreMainActor(dir) {
       changed = true;
     }
 
+    // DynamicSwiftUIViewType.swift: isolated methods called synchronously on main thread
+    if (content.includes('let innerView = provider.getWrappedView() as? ViewType') && !content.includes('MainActor.assumeIsolated { provider.getWrappedView() }')) {
+      content = content.replace(
+        'let innerView = provider.getWrappedView() as? ViewType',
+        'let innerView = MainActor.assumeIsolated { provider.getWrappedView() } as? ViewType'
+      );
+      changed = true;
+    }
+    if (content.includes('return view.getContentView()') && !content.includes('MainActor.assumeIsolated { view.getContentView() }')) {
+      content = content.replace(
+        'return view.getContentView()',
+        'return MainActor.assumeIsolated { view.getContentView() }'
+      );
+      changed = true;
+    }
+
+    // SwiftUIViewDefinition.swift: getContentView called in child transform
+    if (content.includes('let content = hostingUIView.getContentView()') && !content.includes('MainActor.assumeIsolated { hostingUIView.getContentView() }')) {
+      content = content.replace(
+        'let content = hostingUIView.getContentView()',
+        'let content = MainActor.assumeIsolated { hostingUIView.getContentView() }'
+      );
+      changed = true;
+    }
+
     if (changed) {
+
       console.log(`[patched] ExpoModulesCore concurrency in: ${filePath}`);
       fs.writeFileSync(filePath, content, 'utf8');
       patchedFilesCount++;

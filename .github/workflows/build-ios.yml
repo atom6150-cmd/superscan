@@ -8,15 +8,15 @@ on:
 
 jobs:
   build-ipa:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: 檢出程式碼
         uses: actions/checkout@v4
 
-      - name: 設定 Xcode 16.2 版本 (React Native 0.86+ 要求 >= 16.1)
+      - name: 檢查 Xcode 與 Swift 版本 (macos-15 預設支援 Swift 6.2)
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.2.app
           xcodebuild -version
+          swift --version
 
       - name: 安裝 Node.js
         uses: actions/setup-node@v4
@@ -27,59 +27,15 @@ jobs:
       - name: 安裝依賴套件
         run: npm ci || npm install
 
-      - name: 修正 Swift Package Tools 版本與語法 (適配 Xcode 16.2 / Swift 6.0，移除末尾逗號與向下相容巨集)
-        run: |
-          node -e "
-          const fs = require('fs');
-          const path = require('path');
-
-          // 1. 修正 Package.swift 工具版本與末尾逗號
-          function walk(d) {
-            for (let f of fs.readdirSync(d)) {
-              let p = path.join(d, f);
-              if (f === 'Package.swift') {
-                let content = fs.readFileSync(p, 'utf8');
-                let changed = false;
-                if (content.includes('swift-tools-version: 6.2')) {
-                  content = content.replace(/swift-tools-version: 6\.2/g, 'swift-tools-version: 6.0');
-                  changed = true;
-                }
-                if (/,(\s*\))/.test(content)) {
-                  content = content.replace(/,(\s*\))/g, (m, p1) => p1);
-                  changed = true;
-                }
-                if (changed) {
-                  fs.writeFileSync(p, content);
-                  console.log('Fixed Package.swift:', p);
-                }
-              } else if (fs.statSync(p).isDirectory() && f !== '.git') {
-                walk(p);
-              }
-            }
-          }
-          walk('node_modules');
-
-          // 2. 修正 RuntimeScheduler.h 中 Swift 6.0 尚未定義的 SWIFT_RETURNS_RETAINED 巨集
-          const rsPath = 'node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/RuntimeScheduler.h';
-          if (fs.existsSync(rsPath)) {
-            let rs = fs.readFileSync(rsPath, 'utf8');
-            if (!rs.includes('#ifndef SWIFT_RETURNS_RETAINED')) {
-              rs = rs.replace('#include <swift/bridging>', '#include <swift/bridging>\n\n#ifndef SWIFT_RETURNS_RETAINED\n#define SWIFT_RETURNS_RETAINED\n#endif');
-              fs.writeFileSync(rsPath, rs);
-              console.log('Fixed SWIFT_RETURNS_RETAINED in RuntimeScheduler.h');
-            }
-          }
-          "
-
       - name: 產生 iOS 原生專案 (Expo Prebuild)
         run: npx expo prebuild --platform ios --clean --no-install
 
-      - name: 配置 Podfile 與 Xcode 專案停用程式碼簽名與腳本沙盒 (解決 ExpoModulesJSI 與簽名問題)
+      - name: 配置 Podfile 與 Xcode 專案停用程式碼簽名與腳本沙盒 (確保未簽名打包順暢)
         run: |
           node -e "
           const fs = require('fs');
           
-          // 1. 修改 Podfile 關閉簽名並關閉腳本沙盒 (讓 ExpoModulesJSI 能順利編譯 xcframework)
+          // 1. 修改 Podfile 關閉簽名並關閉腳本沙盒
           let podfile = fs.readFileSync('ios/Podfile', 'utf8');
           const bypassCode = \`
               installer.generated_projects.each do |project|
@@ -115,13 +71,6 @@ jobs:
           cd ios
           pod install --repo-update
           cd ..
-
-      - name: 預先編譯 ExpoModulesJSI 原生函式庫 (消除 Xcode 16 內部腳本依賴錯誤)
-        run: |
-          sed -i '' 's/-disableAutomaticPackageResolution//g' node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh || true
-          export PODS_ROOT="$(pwd)/ios/Pods"
-          export PLATFORM_NAME=iphoneos
-          bash node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh || true
 
       - name: 使用 Xcode 編譯並歸檔 (Archive) 未簽名 iOS 原生應用程式
         run: |

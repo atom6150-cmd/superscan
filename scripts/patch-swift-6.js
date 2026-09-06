@@ -20,24 +20,43 @@ function patchSwiftFiles(dir) {
   walkDir(dir, (filePath) => {
     if (!filePath.endsWith('.swift')) return;
     let content = fs.readFileSync(filePath, 'utf8');
+    let changed = false;
+
+    // Fix invalid modifier order where nonisolated(unsafe) came before access modifier:
+    if (content.includes('nonisolated(unsafe) internal weak var')) {
+      content = content.replace(/nonisolated\(unsafe\)\s+internal\s+weak\s+var/g, 'internal nonisolated(unsafe) weak var');
+      changed = true;
+    }
+    if (content.includes('nonisolated(unsafe) private weak var')) {
+      content = content.replace(/nonisolated\(unsafe\)\s+private\s+weak\s+var/g, 'private nonisolated(unsafe) weak var');
+      changed = true;
+    }
+    if (content.includes('nonisolated(unsafe) public weak var')) {
+      content = content.replace(/nonisolated\(unsafe\)\s+public\s+weak\s+var/g, 'public nonisolated(unsafe) weak var');
+      changed = true;
+    }
+
+    // Fix original weak let declarations:
     if (content.includes('weak let')) {
-      console.log(`Patching Swift weak let in: ${filePath}`);
-      
-      // 1. nonisolated(unsafe) weak let -> nonisolated(unsafe) weak var
+      // 1. nonisolated(unsafe) weak let -> nonisolated(unsafe) weak var (for local variables)
       content = content.replace(/nonisolated\(unsafe\)\s+weak\s+let\b/g, 'nonisolated(unsafe) weak var');
       
-      // 2. private weak let -> nonisolated(unsafe) private weak var
-      content = content.replace(/private\s+weak\s+let\b/g, 'nonisolated(unsafe) private weak var');
+      // 2. private weak let -> private nonisolated(unsafe) weak var (access modifier first!)
+      content = content.replace(/private\s+weak\s+let\b/g, 'private nonisolated(unsafe) weak var');
       
-      // 3. internal weak let -> nonisolated(unsafe) internal weak var
-      content = content.replace(/internal\s+weak\s+let\b/g, 'nonisolated(unsafe) internal weak var');
+      // 3. internal weak let -> internal nonisolated(unsafe) weak var (access modifier first!)
+      content = content.replace(/internal\s+weak\s+let\b/g, 'internal nonisolated(unsafe) weak var');
       
-      // 4. public weak let -> nonisolated(unsafe) public weak var
-      content = content.replace(/public\s+weak\s+let\b/g, 'nonisolated(unsafe) public weak var');
+      // 4. public weak let -> public nonisolated(unsafe) weak var (access modifier first!)
+      content = content.replace(/public\s+weak\s+let\b/g, 'public nonisolated(unsafe) weak var');
       
       // 5. Any remaining weak let -> nonisolated(unsafe) weak var
       content = content.replace(/\bweak\s+let\b/g, 'nonisolated(unsafe) weak var');
-      
+      changed = true;
+    }
+
+    if (changed) {
+      console.log(`[patched] Swift modifier order and weak var in: ${filePath}`);
       fs.writeFileSync(filePath, content, 'utf8');
       patchedFilesCount++;
     }
@@ -47,7 +66,7 @@ function patchSwiftFiles(dir) {
 const nodeModulesDir = path.resolve(__dirname, '..', 'node_modules');
 
 // 1. Patch Swift files in expo-modules-jsi and expo-modules-core
-console.log('Searching for Swift weak let occurrences in node_modules...');
+console.log('Searching for Swift weak let / modifier order in node_modules...');
 patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-jsi'));
 patchSwiftFiles(path.join(nodeModulesDir, 'expo-modules-core'));
 
